@@ -1,0 +1,66 @@
+service: student-portal-api
+frameworkVersion: '3'
+useDotenv: true
+
+custom:
+  tableName: 'students-table-${sls:stage}'
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  region: ap-south-1
+  httpApi:
+    cors: true
+    authorizers:
+      studentportalauth:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: https://cognito-idp.ap-south-1.amazonaws.com/${env:USERPOOL_ID}
+        audience:
+          - ${env:CLIENT_ID}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - Fn::GetAtt: [ StudentsTable, Arn ]
+  environment:
+    STUDENTS_TABLE: ${self:custom.tableName}
+    USERPOOL_ID: ${env:USERPOOL_ID}
+
+functions:
+  api:
+    handler: handler.handler
+    events:
+      - httpApi:
+          method: get
+          path: /{any+}
+          authorizer:
+            name: studentportalauth
+      - httpApi:
+          method: post
+          path: /{any+}
+          authorizer:
+            name: studentportalauth
+          
+      
+resources:
+  Resources:
+    StudentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: studentID
+            AttributeType: S
+        KeySchema:
+          - AttributeName: studentID
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:custom.tableName}
