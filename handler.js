@@ -8,41 +8,69 @@ const app = express();
 const STUDENTS_TABLE = process.env.STUDENTS_TABLE;
 const USERPOOL_ID = process.env.USERPOOL_ID
 const dynamoDbClient = new AWS.DynamoDB.DocumentClient();
+const cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
 
 app.use(express.json());
-
-// app.use(cors({ credentials: true, origin: true }))
-
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', true)
   res.header("Access-Control-Allow-Origin", "http://localhost:3000"); // restrict it to the required domain
-  res.header("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Methods", "GET,POST");
   // Set custom headers for CORS
   res.header("Access-Control-Allow-Headers", "Content-type,Accept,X-Custom-Header");
 
   try {
-    res.jwtpayload = jwt_decode(req.headers.authorization);
-  } catch (e) {
-    res.jwtpayload = {};
+    const jwtpayload = jwt_decode(req.headers.authorization);
+    const group = jwtpayload["cognito:groups"][0];
+    switch (req.path) {
+      case "/users":
+      case "/createuser":
+      case "/updatestudent":
+      case "/adddetail":
+        if (["faculty", "superadmin"].includes(group))
+          next();
+        else
+          res.status(401).json({ message: "Unauthorized" });
+        break;
+      default:
+        if (req.path.startsWith("/students/"))
+          if (jwtpayload["username"] == req.params.studentID || ["faculty", "superadmin"].includes(group))
+            next();
+          else
+            res.status(401).json({ message: "Unauthorized" });
+        else
+          next();
+        break;
+    }
+  } catch (_) {
+    next()
   }
-  next()
+
 })
 
-
-
-// app.options('*', cors({
-//   credentials: true,
-//   preflightContinue: true,
-//   origin: "https://1031-49-36-82-182.in.ngrok.io"
-// }));
-
 app.get("/", async function (req, res) {
-  res.status(200).json({ message: "Hello" })
+  const { departmentNo, classNo, username } = { departmentNo: "5", classNo: "4", username: "huz" }
+  if (departmentNo && classNo) {
+    cognitoidentityserviceprovider.adminUpdateUserAttributes(
+      {
+        UserAttributes: [
+          {
+            Name: 'custom:departmentNo',
+            Value: departmentNo
+          },
+          {
+            Name: 'custom:classNo',
+            Value: classNo
+          }
+        ],
+        UserPoolId: USERPOOL_ID,
+        Username: username
+      }
+    ).promise().then(data => res.json(data));
+  }
 })
 
 app.get("/students/:studentID", async function (req, res) {
-  var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
   try {
     var params = {
       UserPoolId: USERPOOL_ID, /* required */
@@ -67,7 +95,6 @@ app.get("/students/:studentID", async function (req, res) {
 });
 
 app.get("/users", async function (req, res) {
-  var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
 
   const users = []
 
@@ -95,7 +122,7 @@ app.get("/users", async function (req, res) {
 
 app.post("/createuser", async function (req, res) {
   const { email, password, type, username } = req.body
-  var cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
+
   var params = {
     UserPoolId: USERPOOL_ID,
     Username: username,
@@ -138,27 +165,73 @@ app.post("/createuser", async function (req, res) {
 });
 
 app.post("/updatestudent", async function (req, res) {
-  const { username, detail } = req.body
-  const studentID = username;
-  const params = {
-    TableName: STUDENTS_TABLE,
-    Item: {
-      studentID: studentID,
-    },
-  };
-
-  for (var key in detail) {
-    params["Item"][key] = detail[key];
-  }
+  const { username, detail, departmentNo, classNo } = req.body;
 
   try {
-    await dynamoDbClient.put(params).promise();
-    res.json({ studentID });
+
+    if (departmentNo && classNo) {
+      var params = {
+        UserAttributes: [
+          {
+            Name: 'custom:departmentNo',
+            Value: departmentNo
+          },
+          {
+            Name: 'custom:classNo',
+            Value: classNo
+          }
+        ],
+        UserPoolId: USERPOOL_ID,
+        Username: username
+      }
+      await cognitoidentityserviceprovider.adminUpdateUserAttributes(params).promise();
+    }
+
+    if (detail) {
+      for (var key in detail) {
+        var params = {
+          TableName: STUDENTS_TABLE,
+          Key: {
+            studentID: username,
+            name: key.toLowerCase()
+          },
+          ExpressionAttributeNames: {
+            "#d": "detail"
+          },
+          ExpressionAttributeValues: {
+            ":d": detail[key]
+          },
+          UpdateExpression: "set #d = :d"
+        };
+        await dynamoDbClient.update(params).promise();
+      }
+    }
+
+    res.status(200).json({ message: "success" });
+
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Could not create user" });
+    res.status(500).json({ error });
   }
+
 });
+
+app.post("/adddetail", async function (req, res) {
+  const { studentID, detail } = req.body;
+
+  for (var key in detail) {
+    const params = {
+      TableName: STUDENTS_TABLE,
+      Item: {
+        studentID,
+        name: key.toLowerCase(),
+        detail: detail[key]
+      }
+    }
+    await dynamoDbClient.put(params).promise();
+  }
+
+  res.status(200).json({ message: "success" })
+})
 
 app.use((req, res, next) => {
   return res.status(404).json({
