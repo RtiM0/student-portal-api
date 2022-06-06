@@ -20,8 +20,8 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Headers", "Content-type,Accept,X-Custom-Header");
 
   try {
-    const jwtpayload = jwt_decode(req.headers.authorization);
-    const group = jwtpayload["cognito:groups"][0];
+    res.jwtpayload = jwt_decode(req.headers.authorization);
+    const group = res.jwtpayload["cognito:groups"][0];
     switch (req.path) {
       case "/users":
       case "/createuser":
@@ -33,13 +33,7 @@ app.use((req, res, next) => {
           res.status(401).json({ message: "Unauthorized" });
         break;
       default:
-        if (req.path.startsWith("/students/"))
-          if (jwtpayload["username"] == req.params.studentID || ["faculty", "superadmin"].includes(group))
-            next();
-          else
-            res.status(401).json({ message: "Unauthorized" });
-        else
-          next();
+        next();
         break;
     }
   } catch (_) {
@@ -49,49 +43,38 @@ app.use((req, res, next) => {
 })
 
 app.get("/", async function (req, res) {
-  const { departmentNo, classNo, username } = { departmentNo: "5", classNo: "4", username: "huz" }
-  if (departmentNo && classNo) {
-    cognitoidentityserviceprovider.adminUpdateUserAttributes(
-      {
-        UserAttributes: [
-          {
-            Name: 'custom:departmentNo',
-            Value: departmentNo
-          },
-          {
-            Name: 'custom:classNo',
-            Value: classNo
-          }
-        ],
-        UserPoolId: USERPOOL_ID,
-        Username: username
-      }
-    ).promise().then(data => res.json(data));
-  }
+  res.status(200).json({ message: "Student Portal API v1.0" })
 })
 
 app.get("/students/:studentID", async function (req, res) {
-  try {
-    var params = {
-      UserPoolId: USERPOOL_ID, /* required */
-      Username: req.params.studentID /* required */
-    };
-    const User = await cognitoidentityserviceprovider.adminGetUser(params).promise()
-    var params = {
-      TableName: STUDENTS_TABLE,
-      Key: {
-        studentID: req.params.studentID,
-      },
-    };
-    const { Item } = await dynamoDbClient.get(params).promise();
-    if (Item) {
-      User.Item = Item
+  if (!(res.jwtpayload["username"] == req.params.studentID || ["faculty", "superadmin"].includes(res.jwtpayload["cognito:groups"][0])))
+    res.status(401).json({ message: "Unauthorized" });
+  else
+    try {
+      var params = {
+        UserPoolId: USERPOOL_ID, /* required */
+        Username: req.params.studentID /* required */
+      };
+      const User = await cognitoidentityserviceprovider.adminGetUser(params).promise()
+      var params = {
+        TableName: STUDENTS_TABLE,
+        ExpressionAttributeNames: {
+          "#k": "studentID"
+        },
+        ExpressionAttributeValues: {
+          ":k": req.params.studentID
+        },
+        KeyConditionExpression: "#k = :k"
+      };
+      const { Items } = await dynamoDbClient.query(params).promise();
+      if (Items) {
+        User.Items = Items
+      }
+      res.status(200).json({ User });
+    } catch (error) {
+      console.log(error);
+      res.status(404).json({ error: "Could not find student" });
     }
-    res.status(200).json({ User });
-  } catch (error) {
-    console.log(error);
-    res.status(404).json({ error: "Could not find student" });
-  }
 });
 
 app.get("/users", async function (req, res) {
@@ -131,6 +114,10 @@ app.post("/createuser", async function (req, res) {
       {
         Name: 'email',
         Value: email
+      },
+      {
+        Name: 'email_verified',
+        Value: "True"
       }
     ]
   }
@@ -230,8 +217,23 @@ app.post("/adddetail", async function (req, res) {
     await dynamoDbClient.put(params).promise();
   }
 
-  res.status(200).json({ message: "success" })
-})
+  res.status(200).json({ message: "success" });
+});
+
+app.post("/deletedetail", async function (req, res) {
+  const { studentID, name } = req.body;
+
+  const params = {
+    TableName: STUDENTS_TABLE,
+    Key: {
+      studentID,
+      name
+    }
+  }
+  await dynamoDbClient.delete(params).promise();
+
+  res.status(200).json({ message: "success" });
+});
 
 app.use((req, res, next) => {
   return res.status(404).json({
