@@ -1,9 +1,10 @@
 service: student-portal-api
 frameworkVersion: '3'
-useDotenv: true
 
 custom:
   tableName: 'students-table-${sls:stage}'
+  userpoolID: !Ref CognitoUserPool
+  userpoolClientID: !Ref UserPoolClient
 
 provider:
   name: aws
@@ -15,9 +16,9 @@ provider:
       studentportalauth:
         type: jwt
         identitySource: $request.header.Authorization
-        issuerUrl: https://cognito-idp.ap-south-1.amazonaws.com/${env:USERPOOL_ID}
+        issuerUrl: !Join ["", ["https://cognito-idp.ap-south-1.amazonaws.com/", !Ref CognitoUserPool]]
         audience:
-          - ${env:CLIENT_ID}
+          - ${self:custom.userpoolClientID}
   iam:
     role:
       statements:
@@ -38,7 +39,8 @@ provider:
             - Fn::GetAtt: [ CognitoUserPool, Arn ]
   environment:
     STUDENTS_TABLE: ${self:custom.tableName}
-    USERPOOL_ID: !Ref CognitoUserPool
+    USERPOOL_ID: ${self:custom.userpoolID}
+    USERPOOL_CLIENT_ID: ${self:custom.userpoolClientID}
 
 functions:
   api:
