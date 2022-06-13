@@ -31,6 +31,11 @@ provider:
             - dynamodb:DeleteItem
           Resource:
             - Fn::GetAtt: [ StudentsTable, Arn ]
+        - Effect: Allow
+          Action:
+            - cognito-idp:*
+          Resource:
+            - Fn::GetAtt: [ CognitoUserPool, Arn ]
   environment:
     STUDENTS_TABLE: ${self:custom.tableName}
     USERPOOL_ID: !Ref CognitoUserPool
