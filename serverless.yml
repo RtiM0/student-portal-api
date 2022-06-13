@@ -129,3 +129,8 @@ resources:
         Ref: CognitoUserPool
       Export:
         Name: UserPoolId-${sls:stage}
+    UserPoolClientId:
+      Value:
+        Ref: UserPoolClient
+      Export:
+        Name: UserPoolClientId-${sls:stage}
