@@ -33,7 +33,7 @@ provider:
             - Fn::GetAtt: [ StudentsTable, Arn ]
   environment:
     STUDENTS_TABLE: ${self:custom.tableName}
-    USERPOOL_ID: ${env:USERPOOL_ID}
+    USERPOOL_ID: !Ref CognitoUserPool
 
 functions:
   api:
@@ -68,3 +68,59 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
         TableName: ${self:custom.tableName}
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: student-portal-user-pool-${sls:stage}
+        AliasAttributes:
+          - email
+          - phone_number
+        AutoVerifiedAttributes:
+          - email
+        UsernameConfiguration:
+          CaseSensitive: false
+        Schema:
+          - Name: email
+            AttributeDataType: String
+            Required: true
+            Mutable: true
+          - Name: departmentNo
+            AttributeDataType: String
+            Required: false
+            Mutable: true
+          - Name: classNo
+            AttributeDataType: String
+            Required: false
+            Mutable: true
+        AccountRecoverySetting:
+          RecoveryMechanisms:
+            - Name: verified_email
+              Priority: 1
+        EmailConfiguration:
+          EmailSendingAccount: 'COGNITO_DEFAULT'
+    AdminGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: "superadmin"
+        UserPoolId: { Ref: CognitoUserPool }
+    FacultyGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: "faculty"
+        UserPoolId: { Ref: CognitoUserPool }
+    StudentGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: "student"
+        UserPoolId: { Ref: CognitoUserPool }
+    UserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        UserPoolId: { Ref: CognitoUserPool }
+        ClientName: "react"
+  Outputs:
+    UserPoolId:
+      Value:
+        Ref: CognitoUserPool
+      Export:
+        Name: UserPoolId-${sls:stage}
